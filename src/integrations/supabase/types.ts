@@ -87,6 +87,13 @@ export type Database = {
             referencedRelation: "messages"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "messages_user_id_profiles_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
         ]
       }
       profiles: {
@@ -121,6 +128,38 @@ export type Database = {
           username?: string | null
         }
         Relationships: []
+      }
+      room_join_requests: {
+        Row: {
+          created_at: string
+          id: string
+          room_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          room_id: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          room_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_join_requests_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "chat_rooms"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       room_members: {
         Row: {
