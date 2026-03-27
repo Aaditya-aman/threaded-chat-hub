@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RoomData } from "@/pages/Index";
 import { Tables } from "@/integrations/supabase/types";
-import { Search, Plus, MessageSquare, LogOut, User } from "lucide-react";
+import { Search, Plus, MessageSquare, LogOut, Hash } from "lucide-react";
 import { motion } from "framer-motion";
 
 type Profile = Tables<"profiles">;
@@ -11,12 +11,13 @@ interface RoomSidebarProps {
   rooms: RoomData[];
   activeRoomId: string | null;
   onSelectRoom: (id: string) => void;
-  onCreateRoom: (name: string, description: string, emoji: string) => void;
+  onCreateRoom: (name: string, description: string) => void;
   profile: Profile | null;
   onSignOut: () => void;
+  memberRoomIds: Set<string>;
 }
 
-export const RoomSidebar = ({ rooms, activeRoomId, onSelectRoom, onCreateRoom, profile, onSignOut }: RoomSidebarProps) => {
+export const RoomSidebar = ({ rooms, activeRoomId, onSelectRoom, onCreateRoom, profile, onSignOut, memberRoomIds }: RoomSidebarProps) => {
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -27,8 +28,7 @@ export const RoomSidebar = ({ rooms, activeRoomId, onSelectRoom, onCreateRoom, p
 
   const handleCreate = () => {
     if (newName.trim()) {
-      const emojis = ["💬", "🎯", "🌟", "🔥", "⚡", "🎨", "🧪"];
-      onCreateRoom(newName.trim(), newDesc.trim(), emojis[Math.floor(Math.random() * emojis.length)]);
+      onCreateRoom(newName.trim(), newDesc.trim());
       setNewName("");
       setNewDesc("");
       setCreating(false);
@@ -59,22 +59,26 @@ export const RoomSidebar = ({ rooms, activeRoomId, onSelectRoom, onCreateRoom, p
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin p-2 space-y-1">
-        {filtered.map(room => (
-          <motion.button key={room.id} whileHover={{ x: 2 }} onClick={() => onSelectRoom(room.id)} className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${activeRoomId === room.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-lg flex-shrink-0">{room.emoji}</span>
-                <div className="min-w-0">
-                  <div className="font-medium text-sm truncate">{room.name}</div>
-                  <div className="text-xs text-muted-foreground truncate">{room.description}</div>
+        {filtered.map(room => {
+          const isMember = memberRoomIds.has(room.id);
+          return (
+            <motion.button key={room.id} whileHover={{ x: 2 }} onClick={() => onSelectRoom(room.id)} className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors ${activeRoomId === room.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Hash className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate">{room.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">{room.description}</div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
+                  <span className="text-xs text-muted-foreground">{timeAgo(room.created_at)}</span>
+                  {!isMember && <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">Join</span>}
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-1 flex-shrink-0 ml-2">
-                <span className="text-xs text-muted-foreground">{timeAgo(room.created_at)}</span>
-              </div>
-            </div>
-          </motion.button>
-        ))}
+            </motion.button>
+          );
+        })}
       </div>
 
       <div className="p-3 border-t border-sidebar-border space-y-2">
@@ -93,7 +97,6 @@ export const RoomSidebar = ({ rooms, activeRoomId, onSelectRoom, onCreateRoom, p
           </button>
         )}
 
-        {/* User profile section */}
         <div className="flex items-center gap-2 pt-2 border-t border-sidebar-border">
           <button onClick={() => profile?.username && navigate(`/profile/${profile.username}`)} className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary hover:ring-1 hover:ring-primary transition-all cursor-pointer flex-shrink-0">
             {initials}

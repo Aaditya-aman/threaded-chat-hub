@@ -34,7 +34,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .select("*")
       .eq("user_id", userId)
       .single();
-    setProfile(data);
+    if (data) {
+      setProfile(data);
+    } else {
+      // Fallback: create profile if trigger didn't fire
+      const { data: userData } = await supabase.auth.getUser();
+      const email = userData?.user?.email || "user";
+      const fullName = userData?.user?.user_metadata?.full_name || email;
+      const username = email.split("@")[0] + "_" + userId.slice(0, 4);
+      const { data: newProfile } = await supabase
+        .from("profiles")
+        .insert({ user_id: userId, display_name: fullName, username })
+        .select()
+        .single();
+      setProfile(newProfile);
+    }
   };
 
   const refreshProfile = async () => {
