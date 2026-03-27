@@ -1,23 +1,22 @@
 import { useState } from "react";
-import { Message } from "@/types/replychain";
+import { MessageData } from "@/pages/Index";
 import { VoteButton } from "./VoteButton";
 import { MessageSquare, ChevronDown, ChevronRight, Maximize2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface ThreadMessageProps {
-  message: Message;
+  message: MessageData;
   depth: number;
   maxDepth: number;
   onVote: (messageId: string, vote: 1 | -1) => void;
   onReply: (parentId: string, content: string) => void;
-  onFocus: (message: Message) => void;
+  onFocus: (message: MessageData) => void;
   searchQuery?: string;
 }
 
-const MAX_DEPTH = 4;
-
-const timeAgo = (date: Date) => {
-  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+const timeAgo = (dateStr: string) => {
+  const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
@@ -38,6 +37,7 @@ export const ThreadMessage = ({ message, depth, maxDepth, onVote, onReply, onFoc
   const [collapsed, setCollapsed] = useState(false);
   const [replying, setReplying] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const navigate = useNavigate();
 
   const handleSubmitReply = () => {
     if (replyText.trim()) {
@@ -48,6 +48,9 @@ export const ThreadMessage = ({ message, depth, maxDepth, onVote, onReply, onFoc
   };
 
   const canNest = depth < maxDepth;
+  const displayName = message.profile?.display_name || message.profile?.username || "Unknown";
+  const initials = displayName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const username = message.profile?.username;
 
   return (
     <div className="group">
@@ -61,42 +64,37 @@ export const ThreadMessage = ({ message, depth, maxDepth, onVote, onReply, onFoc
         )}
         <div className="flex-1 min-w-0">
           <div className="flex gap-2">
-            <VoteButton
-              count={message.votesCount}
-              userVote={message.userVote}
-              onVote={(vote) => onVote(message.id, vote)}
-            />
+            <VoteButton count={message.votes_count} userVote={message.userVote as 1 | -1 | 0} onVote={(vote) => onVote(message.id, vote)} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-secondary-foreground flex-shrink-0">
-                  {message.user.avatar}
-                </div>
-                <span className="text-sm font-medium text-foreground">{message.user.name}</span>
-                <span className="text-xs text-muted-foreground">· {timeAgo(message.createdAt)}</span>
+                <button
+                  onClick={() => username && navigate(`/profile/${username}`)}
+                  className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-secondary-foreground flex-shrink-0 hover:ring-1 hover:ring-primary transition-all cursor-pointer"
+                >
+                  {initials}
+                </button>
+                <button
+                  onClick={() => username && navigate(`/profile/${username}`)}
+                  className="text-sm font-medium text-foreground hover:text-primary transition-colors cursor-pointer"
+                >
+                  {displayName}
+                </button>
+                <span className="text-xs text-muted-foreground">· {timeAgo(message.created_at)}</span>
               </div>
               <p className="text-sm text-foreground/90 leading-relaxed mb-1.5">
                 {highlightText(message.content, searchQuery)}
               </p>
               <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                 {canNest && (
-                  <button
-                    onClick={() => setReplying(!replying)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-                  >
+                  <button onClick={() => setReplying(!replying)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
                     <MessageSquare className="w-3 h-3" /> Reply
                   </button>
                 )}
-                <button
-                  onClick={() => onFocus(message)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-                >
+                <button onClick={() => onFocus(message)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors">
                   <Maximize2 className="w-3 h-3" /> Focus
                 </button>
                 {message.children.length > 0 && (
-                  <button
-                    onClick={() => setCollapsed(!collapsed)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
+                  <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
                     {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     {collapsed ? `Show ${message.children.length} replies` : "Collapse"}
                   </button>
@@ -105,24 +103,8 @@ export const ThreadMessage = ({ message, depth, maxDepth, onVote, onReply, onFoc
 
               <AnimatePresence>
                 {replying && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="mt-2 overflow-hidden"
-                  >
-                    <textarea
-                      value={replyText}
-                      onChange={e => setReplyText(e.target.value)}
-                      placeholder="Write a reply..."
-                      className="w-full bg-secondary rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none"
-                      rows={2}
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmitReply();
-                        if (e.key === "Escape") setReplying(false);
-                      }}
-                    />
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-2 overflow-hidden">
+                    <textarea value={replyText} onChange={e => setReplyText(e.target.value)} placeholder="Write a reply..." className="w-full bg-secondary rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary resize-none" rows={2} autoFocus onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmitReply(); if (e.key === "Escape") setReplying(false); }} />
                     <div className="flex gap-2 mt-1.5">
                       <button onClick={handleSubmitReply} className="bg-primary text-primary-foreground text-xs font-medium px-3 py-1 rounded-md hover:opacity-90 transition-opacity">Reply</button>
                       <button onClick={() => setReplying(false)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
@@ -133,23 +115,9 @@ export const ThreadMessage = ({ message, depth, maxDepth, onVote, onReply, onFoc
 
               <AnimatePresence>
                 {!collapsed && message.children.length > 0 && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="mt-2 space-y-2 overflow-hidden"
-                  >
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-2 space-y-2 overflow-hidden">
                     {message.children.map(child => (
-                      <ThreadMessage
-                        key={child.id}
-                        message={child}
-                        depth={depth + 1}
-                        maxDepth={maxDepth}
-                        onVote={onVote}
-                        onReply={onReply}
-                        onFocus={onFocus}
-                        searchQuery={searchQuery}
-                      />
+                      <ThreadMessage key={child.id} message={child} depth={depth + 1} maxDepth={maxDepth} onVote={onVote} onReply={onReply} onFocus={onFocus} searchQuery={searchQuery} />
                     ))}
                   </motion.div>
                 )}

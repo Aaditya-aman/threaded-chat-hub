@@ -1,47 +1,48 @@
 import { useState, useMemo } from "react";
-import { ChatRoom, Message, SortMode } from "@/types/replychain";
+import { MessageData, RoomData } from "@/pages/Index";
 import { ThreadMessage } from "./ThreadMessage";
 import { FocusView } from "./FocusView";
-import { Search, ArrowUpDown, TrendingUp, Clock, Sparkles, Send, Users, X } from "lucide-react";
+import { Search, ArrowUpDown, TrendingUp, Clock, Sparkles, Send, Users, X, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+type SortMode = "top" | "new" | "relevant";
+
 interface ChatViewProps {
-  room: ChatRoom;
-  messages: Message[];
+  room: RoomData;
+  messages: MessageData[];
+  loading: boolean;
   onVote: (messageId: string, vote: 1 | -1) => void;
   onReply: (parentId: string, content: string) => void;
   onNewThread: (content: string) => void;
 }
 
-const sortMessages = (msgs: Message[], mode: SortMode): Message[] => {
+const sortMessages = (msgs: MessageData[], mode: SortMode): MessageData[] => {
   const sorted = [...msgs];
   switch (mode) {
-    case "top": sorted.sort((a, b) => b.votesCount - a.votesCount); break;
-    case "new": sorted.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); break;
-    case "relevant": sorted.sort((a, b) => (b.votesCount * 2 + b.children.length) - (a.votesCount * 2 + a.children.length)); break;
+    case "top": sorted.sort((a, b) => b.votes_count - a.votes_count); break;
+    case "new": sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); break;
+    case "relevant": sorted.sort((a, b) => (b.votes_count * 2 + b.children.length) - (a.votes_count * 2 + a.children.length)); break;
   }
   return sorted;
 };
 
-const messageMatchesSearch = (msg: Message, query: string): boolean => {
+const messageMatchesSearch = (msg: MessageData, query: string): boolean => {
   if (msg.content.toLowerCase().includes(query)) return true;
   return msg.children.some(c => messageMatchesSearch(c, query));
 };
 
-export const ChatView = ({ room, messages, onVote, onReply, onNewThread }: ChatViewProps) => {
+export const ChatView = ({ room, messages, loading, onVote, onReply, onNewThread }: ChatViewProps) => {
   const [sortMode, setSortMode] = useState<SortMode>("relevant");
   const [searchQuery, setSearchQuery] = useState("");
   const [newThreadText, setNewThreadText] = useState("");
-  const [focusedMessage, setFocusedMessage] = useState<Message | null>(null);
+  const [focusedMessage, setFocusedMessage] = useState<MessageData | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-
-  const rootMessages = messages.filter(m => m.parentId === null);
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const msgs = q ? rootMessages.filter(m => messageMatchesSearch(m, q)) : rootMessages;
+    const msgs = q ? messages.filter(m => messageMatchesSearch(m, q)) : messages;
     return sortMessages(msgs, sortMode);
-  }, [rootMessages, searchQuery, sortMode]);
+  }, [messages, searchQuery, sortMode]);
 
   const handleNewThread = () => {
     if (newThreadText.trim()) {
@@ -70,7 +71,6 @@ export const ChatView = ({ room, messages, onVote, onReply, onNewThread }: ChatV
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      {/* Header */}
       <div className="px-6 py-4 border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
@@ -81,33 +81,20 @@ export const ChatView = ({ room, messages, onVote, onReply, onNewThread }: ChatV
               <Users className="w-3.5 h-3.5" /> {room.memberCount} members · {room.description}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowSearch(!showSearch)}
-              className={`p-2 rounded-md transition-colors ${showSearch ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
-            >
-              <Search className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            onClick={() => setShowSearch(!showSearch)}
+            className={`p-2 rounded-md transition-colors ${showSearch ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
+          >
+            <Search className="w-4 h-4" />
+          </button>
         </div>
 
         <AnimatePresence>
           {showSearch && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden"
-            >
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
               <div className="relative mt-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search threads in this room..."
-                  className="w-full bg-secondary rounded-md pl-9 pr-9 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
-                  autoFocus
-                />
+                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search threads..." className="w-full bg-secondary rounded-md pl-9 pr-9 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" autoFocus />
                 {searchQuery && (
                   <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     <X className="w-4 h-4" />
@@ -118,69 +105,39 @@ export const ChatView = ({ room, messages, onVote, onReply, onNewThread }: ChatV
           )}
         </AnimatePresence>
 
-        {/* Sort */}
         <div className="flex items-center gap-1 mt-3">
           <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground mr-1" />
           {sortButtons.map(sb => (
-            <button
-              key={sb.mode}
-              onClick={() => setSortMode(sb.mode)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                sortMode === sb.mode
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-              }`}
-            >
+            <button key={sb.mode} onClick={() => setSortMode(sb.mode)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${sortMode === sb.mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}>
               {sb.icon} {sb.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4 space-y-4">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <MessageEmpty />
             <p className="mt-2 text-sm">{searchQuery ? "No threads match your search" : "No threads yet. Start one below!"}</p>
           </div>
         ) : (
           filtered.map(msg => (
-            <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-card rounded-lg p-4 border border-border hover:border-primary/20 transition-colors"
-            >
-              <ThreadMessage
-                message={msg}
-                depth={0}
-                maxDepth={4}
-                onVote={onVote}
-                onReply={onReply}
-                onFocus={setFocusedMessage}
-                searchQuery={searchQuery}
-              />
+            <motion.div key={msg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-lg p-4 border border-border hover:border-primary/20 transition-colors">
+              <ThreadMessage message={msg} depth={0} maxDepth={4} onVote={onVote} onReply={onReply} onFocus={setFocusedMessage} searchQuery={searchQuery} />
             </motion.div>
           ))
         )}
       </div>
 
-      {/* New thread input */}
       <div className="px-6 py-4 border-t border-border flex-shrink-0">
         <div className="flex gap-2">
-          <input
-            value={newThreadText}
-            onChange={e => setNewThreadText(e.target.value)}
-            placeholder="Start a new thread..."
-            className="flex-1 bg-secondary rounded-md px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary"
-            onKeyDown={e => e.key === "Enter" && handleNewThread()}
-          />
-          <button
-            onClick={handleNewThread}
-            disabled={!newThreadText.trim()}
-            className="bg-primary text-primary-foreground px-4 py-2.5 rounded-md hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <input value={newThreadText} onChange={e => setNewThreadText(e.target.value)} placeholder="Start a new thread..." className="flex-1 bg-secondary rounded-md px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" onKeyDown={e => e.key === "Enter" && handleNewThread()} />
+          <button onClick={handleNewThread} disabled={!newThreadText.trim()} className="bg-primary text-primary-foreground px-4 py-2.5 rounded-md hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed">
             <Send className="w-4 h-4" />
           </button>
         </div>

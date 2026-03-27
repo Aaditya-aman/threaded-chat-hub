@@ -1,12 +1,12 @@
-import { ChatRoom } from "@/types/replychain";
+import { RoomData } from "@/pages/Index";
 import { Menu, X, MessageSquare } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 interface MobileNavProps {
   open: boolean;
   onToggle: () => void;
-  rooms: ChatRoom[];
-  activeRoomId: string;
+  rooms: RoomData[];
+  activeRoomId: string | null;
   onSelectRoom: (id: string) => void;
 }
 
@@ -19,33 +19,15 @@ export const MobileNav = ({ open, onToggle, rooms, activeRoomId, onSelectRoom }:
       <AnimatePresence>
         {open && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={onToggle}
-              className="md:hidden fixed inset-0 bg-background/80 z-40"
-            />
-            <motion.div
-              initial={{ x: -288 }}
-              animate={{ x: 0 }}
-              exit={{ x: -288 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="md:hidden fixed left-0 top-0 bottom-0 w-72 bg-sidebar border-r border-sidebar-border z-40 overflow-y-auto"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onToggle} className="md:hidden fixed inset-0 bg-background/80 z-40" />
+            <motion.div initial={{ x: -288 }} animate={{ x: 0 }} exit={{ x: -288 }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="md:hidden fixed left-0 top-0 bottom-0 w-72 bg-sidebar border-r border-sidebar-border z-40 overflow-y-auto">
               <div className="p-4 pt-14 space-y-1">
                 <div className="flex items-center gap-2 mb-4 px-2">
                   <MessageSquare className="w-5 h-5 text-primary" />
                   <span className="font-display font-bold text-sidebar-accent-foreground">ReplyChain</span>
                 </div>
                 {rooms.map(room => (
-                  <button
-                    key={room.id}
-                    onClick={() => { onSelectRoom(room.id); onToggle(); }}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                      activeRoomId === room.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"
-                    }`}
-                  >
+                  <button key={room.id} onClick={() => { onSelectRoom(room.id); onToggle(); }} className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${activeRoomId === room.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
                     <span className="mr-2">{room.emoji}</span>{room.name}
                   </button>
                 ))}
