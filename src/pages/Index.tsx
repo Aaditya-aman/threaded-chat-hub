@@ -33,13 +33,6 @@ const addReplyInTree = (messages: Message[], parentId: string, reply: Message): 
   });
 };
 
-// Flatten all messages from the tree for the flat array
-const flattenMessages = (msgs: Message[]): Message[] => {
-  const result: Message[] = [];
-  const walk = (m: Message) => { result.push(m); m.children.forEach(walk); };
-  msgs.forEach(walk);
-  return result;
-};
 
 const Index = () => {
   const [rooms, setRooms] = useState<ChatRoom[]>(initialRooms);
