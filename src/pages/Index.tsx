@@ -130,7 +130,7 @@ const Index = () => {
       </div>
       <ChatView
         room={activeRoom}
-        messages={flatMessages}
+        messages={roomMessages}
         onVote={handleVote}
         onReply={handleReply}
         onNewThread={handleNewThread}
