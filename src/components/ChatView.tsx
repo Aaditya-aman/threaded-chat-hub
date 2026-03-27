@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
-import { MessageData, RoomData } from "@/pages/Index";
+import { MessageData, RoomData, JoinRequest } from "@/pages/Index";
 import { ThreadMessage } from "./ThreadMessage";
 import { FocusView } from "./FocusView";
-import { Search, ArrowUpDown, TrendingUp, Clock, Sparkles, Send, Users, X, Loader2 } from "lucide-react";
+import { Search, ArrowUpDown, TrendingUp, Clock, Sparkles, Send, Users, X, Loader2, Lock, CheckCircle, XCircle, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type SortMode = "top" | "new" | "relevant";
@@ -14,6 +14,12 @@ interface ChatViewProps {
   onVote: (messageId: string, vote: 1 | -1) => void;
   onReply: (parentId: string, content: string) => void;
   onNewThread: (content: string) => void;
+  isMember: boolean;
+  joinRequest: JoinRequest | null | undefined;
+  onRequestJoin: () => void;
+  pendingRequests: JoinRequest[];
+  onApproveRequest: (requestId: string, approved: boolean) => void;
+  isOwner: boolean;
 }
 
 const sortMessages = (msgs: MessageData[], mode: SortMode): MessageData[] => {
@@ -31,7 +37,7 @@ const messageMatchesSearch = (msg: MessageData, query: string): boolean => {
   return msg.children.some(c => messageMatchesSearch(c, query));
 };
 
-export const ChatView = ({ room, messages, loading, onVote, onReply, onNewThread }: ChatViewProps) => {
+export const ChatView = ({ room, messages, loading, onVote, onReply, onNewThread, isMember, joinRequest, onRequestJoin, pendingRequests, onApproveRequest, isOwner }: ChatViewProps) => {
   const [sortMode, setSortMode] = useState<SortMode>("relevant");
   const [searchQuery, setSearchQuery] = useState("");
   const [newThreadText, setNewThreadText] = useState("");
@@ -74,74 +80,125 @@ export const ChatView = ({ room, messages, loading, onVote, onReply, onNewThread
       <div className="px-6 py-4 border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-display text-xl font-bold flex items-center gap-2">
-              <span>{room.emoji}</span> {room.name}
-            </h2>
+            <h2 className="font-display text-xl font-bold">{room.name}</h2>
             <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
               <Users className="w-3.5 h-3.5" /> {room.memberCount} members · {room.description}
             </p>
           </div>
-          <button
-            onClick={() => setShowSearch(!showSearch)}
-            className={`p-2 rounded-md transition-colors ${showSearch ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
-          >
-            <Search className="w-4 h-4" />
-          </button>
-        </div>
-
-        <AnimatePresence>
-          {showSearch && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-              <div className="relative mt-3">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search threads..." className="w-full bg-secondary rounded-md pl-9 pr-9 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" autoFocus />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="flex items-center gap-1 mt-3">
-          <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground mr-1" />
-          {sortButtons.map(sb => (
-            <button key={sb.mode} onClick={() => setSortMode(sb.mode)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${sortMode === sb.mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}>
-              {sb.icon} {sb.label}
+          {isMember && (
+            <button
+              onClick={() => setShowSearch(!showSearch)}
+              className={`p-2 rounded-md transition-colors ${showSearch ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
+            >
+              <Search className="w-4 h-4" />
             </button>
-          ))}
+          )}
         </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4 space-y-4">
-        {loading ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+        {/* Pending join requests for room owner */}
+        {isOwner && pendingRequests.length > 0 && (
+          <div className="mt-3 p-3 bg-accent/50 rounded-lg border border-accent">
+            <p className="text-sm font-medium text-accent-foreground mb-2">
+              <UserPlus className="w-4 h-4 inline mr-1" />
+              {pendingRequests.length} pending join request{pendingRequests.length > 1 ? "s" : ""}
+            </p>
+            <div className="space-y-2">
+              {pendingRequests.map(req => (
+                <div key={req.id} className="flex items-center justify-between bg-background rounded-md px-3 py-2">
+                  <span className="text-sm text-foreground">User request</span>
+                  <div className="flex gap-1">
+                    <button onClick={() => onApproveRequest(req.id, true)} className="p-1 text-green-500 hover:bg-green-500/10 rounded" title="Approve">
+                      <CheckCircle className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => onApproveRequest(req.id, false)} className="p-1 text-destructive hover:bg-destructive/10 rounded" title="Reject">
+                      <XCircle className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <MessageEmpty />
-            <p className="mt-2 text-sm">{searchQuery ? "No threads match your search" : "No threads yet. Start one below!"}</p>
-          </div>
-        ) : (
-          filtered.map(msg => (
-            <motion.div key={msg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-lg p-4 border border-border hover:border-primary/20 transition-colors">
-              <ThreadMessage message={msg} depth={0} maxDepth={4} onVote={onVote} onReply={onReply} onFocus={setFocusedMessage} searchQuery={searchQuery} />
-            </motion.div>
-          ))
+        )}
+
+        {isMember && (
+          <>
+            <AnimatePresence>
+              {showSearch && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                  <div className="relative mt-3">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search threads..." className="w-full bg-secondary rounded-md pl-9 pr-9 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="flex items-center gap-1 mt-3">
+              <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground mr-1" />
+              {sortButtons.map(sb => (
+                <button key={sb.mode} onClick={() => setSortMode(sb.mode)} className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${sortMode === sb.mode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}>
+                  {sb.icon} {sb.label}
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
-      <div className="px-6 py-4 border-t border-border flex-shrink-0">
-        <div className="flex gap-2">
-          <input value={newThreadText} onChange={e => setNewThreadText(e.target.value)} placeholder="Start a new thread..." className="flex-1 bg-secondary rounded-md px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" onKeyDown={e => e.key === "Enter" && handleNewThread()} />
-          <button onClick={handleNewThread} disabled={!newThreadText.trim()} className="bg-primary text-primary-foreground px-4 py-2.5 rounded-md hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed">
-            <Send className="w-4 h-4" />
-          </button>
+      {!isMember ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 px-6">
+          <Lock className="w-10 h-10 text-muted-foreground/50" />
+          <p className="text-center text-sm">You need to join this room to see messages and participate.</p>
+          {joinRequest?.status === "pending" ? (
+            <div className="px-4 py-2 bg-accent text-accent-foreground rounded-md text-sm font-medium">
+              Request pending…
+            </div>
+          ) : joinRequest?.status === "rejected" ? (
+            <div className="px-4 py-2 bg-destructive/10 text-destructive rounded-md text-sm font-medium">
+              Request was rejected
+            </div>
+          ) : (
+            <button onClick={onRequestJoin} className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:opacity-90 transition-opacity">
+              Request to Join
+            </button>
+          )}
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4 space-y-4">
+            {loading ? (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                <MessageEmpty />
+                <p className="mt-2 text-sm">{searchQuery ? "No threads match your search" : "No threads yet. Start one below!"}</p>
+              </div>
+            ) : (
+              filtered.map(msg => (
+                <motion.div key={msg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-lg p-4 border border-border hover:border-primary/20 transition-colors">
+                  <ThreadMessage message={msg} depth={0} maxDepth={4} onVote={onVote} onReply={onReply} onFocus={setFocusedMessage} searchQuery={searchQuery} />
+                </motion.div>
+              ))
+            )}
+          </div>
+
+          <div className="px-6 py-4 border-t border-border flex-shrink-0">
+            <div className="flex gap-2">
+              <input value={newThreadText} onChange={e => setNewThreadText(e.target.value)} placeholder="Start a new thread..." className="flex-1 bg-secondary rounded-md px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary" onKeyDown={e => e.key === "Enter" && handleNewThread()} />
+              <button onClick={handleNewThread} disabled={!newThreadText.trim()} className="bg-primary text-primary-foreground px-4 py-2.5 rounded-md hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed">
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
