@@ -49,7 +49,7 @@ const Index = () => {
 
   const activeRoom = rooms.find(r => r.id === activeRoomId)!;
   const roomMessages = allMessages[activeRoomId] || [];
-  const flatMessages = flattenMessages(roomMessages);
+  
 
   const handleVote = useCallback((messageId: string, vote: 1 | -1) => {
     setAllMessages(prev => ({
