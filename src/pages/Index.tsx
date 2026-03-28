@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { RoomSidebar } from "@/components/RoomSidebar";
 import { ChatView } from "@/components/ChatView";
 import { MobileNav } from "@/components/MobileNav";
 import { Loader2 } from "lucide-react";
+import { insertMentionsAndNotifications } from "@/lib/mentions";
 
 export interface RoomData {
   id: string;
@@ -22,6 +24,9 @@ export interface MessageData {
   user_id: string;
   content: string;
   image_url: string | null;
+  attachment_url: string | null;
+  attachment_type: string | null;
+  is_pinned: boolean;
   votes_count: number;
   created_at: string;
   profile: {
@@ -31,6 +36,7 @@ export interface MessageData {
   } | null;
   userVote: number;
   children: MessageData[];
+  mentionedUsernames: string[];
 }
 
 export interface JoinRequest {
@@ -41,7 +47,22 @@ export interface JoinRequest {
   created_at: string;
 }
 
+export type AttachmentPayload = { path: string; attachment_type: string };
+
+function flipPinInTree(msgs: MessageData[], messageId: string): MessageData[] {
+  return msgs.map((m) => {
+    if (m.id === messageId) return { ...m, is_pinned: !m.is_pinned };
+    if (m.children.length)
+      return { ...m, children: flipPinInTree(m.children, messageId) };
+    return m;
+  });
+}
+
 const Index = () => {
+  const { roomId: urlRoomId, messageId: urlMessageId } = useParams<{
+    roomId?: string;
+    messageId?: string;
+  }>();
   const { user, profile, signOut } = useAuth();
   const [rooms, setRooms] = useState<RoomData[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -51,42 +72,59 @@ const Index = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [memberRoomIds, setMemberRoomIds] = useState<Set<string>>(new Set());
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
+  const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  const didScrollRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (urlRoomId) setActiveRoomId(urlRoomId);
+  }, [urlRoomId]);
+
+  useEffect(() => {
+    didScrollRef.current = null;
+  }, [urlMessageId, activeRoomId]);
 
   // Fetch rooms + membership
   useEffect(() => {
     if (!user) return;
     const fetchRooms = async () => {
-      const [{ data: roomData }, { data: memberData }, { data: requestData }] = await Promise.all([
-        supabase.from("chat_rooms").select("*, room_members(count)").order("created_at", { ascending: false }),
-        supabase.from("room_members").select("room_id").eq("user_id", user.id),
-        supabase.from("room_join_requests").select("*").eq("user_id", user.id),
-      ]);
+      const [{ data: roomData }, { data: memberData }, { data: requestData }] =
+        await Promise.all([
+          supabase
+            .from("chat_rooms")
+            .select("*, room_members(count)")
+            .order("created_at", { ascending: false }),
+          supabase.from("room_members").select("room_id").eq("user_id", user.id),
+          supabase.from("room_join_requests").select("*").eq("user_id", user.id),
+        ]);
 
       if (memberData) {
-        setMemberRoomIds(new Set(memberData.map(m => m.room_id)));
+        setMemberRoomIds(new Set(memberData.map((m) => m.room_id)));
       }
       if (requestData) {
         setJoinRequests(requestData as JoinRequest[]);
       }
       if (roomData) {
-        const mapped = roomData.map(r => ({
+        const mapped = roomData.map((r) => ({
           id: r.id,
           name: r.name,
           description: r.description || "",
           created_at: r.created_at,
           created_by: r.created_by,
-          memberCount: (r.room_members as any)?.[0]?.count || 0,
+          memberCount: (r.room_members as { count: number }[])?.[0]?.count || 0,
         }));
         setRooms(mapped);
-        if (!activeRoomId && mapped.length > 0) {
-          // Prefer a room user is a member of
-          const memberRoom = mapped.find(r => memberData?.some(m => m.room_id === r.id));
+        if (!urlRoomId && !activeRoomId && mapped.length > 0) {
+          const memberRoom = mapped.find((r) =>
+            memberData?.some((m) => m.room_id === r.id)
+          );
           setActiveRoomId(memberRoom?.id || mapped[0].id);
         }
       }
       setLoadingRooms(false);
     };
     fetchRooms();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only; avoid re-fetch when activeRoomId changes
   }, [user]);
 
   // Fetch messages for active room (only if member)
@@ -100,7 +138,9 @@ const Index = () => {
       setLoadingMessages(true);
       const { data: msgs } = await supabase
         .from("messages")
-        .select("*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)")
+        .select(
+          "*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)"
+        )
         .eq("chat_id", activeRoomId)
         .order("created_at", { ascending: true });
 
@@ -110,14 +150,42 @@ const Index = () => {
         .eq("user_id", user.id);
 
       const voteMap = new Map<string, number>();
-      votes?.forEach(v => voteMap.set(v.message_id, v.value));
+      votes?.forEach((v) => voteMap.set(v.message_id, v.value));
+
+      const mentionByMessage = new Map<string, string[]>();
+      if (msgs?.length) {
+        const ids = msgs.map((m) => m.id);
+        const { data: mentionRows } = await supabase
+          .from("mentions")
+          .select("message_id, mentioned_user_id")
+          .in("message_id", ids);
+        const uids = [...new Set(mentionRows?.map((r) => r.mentioned_user_id) || [])];
+        if (uids.length) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("user_id, username")
+            .in("user_id", uids);
+          const uidToUser = new Map(
+            profs?.map((p) => [p.user_id, p.username?.toLowerCase() || ""]) || []
+          );
+          for (const row of mentionRows || []) {
+            const un = uidToUser.get(row.mentioned_user_id);
+            if (!un) continue;
+            const arr = mentionByMessage.get(row.message_id) || [];
+            arr.push(un);
+            mentionByMessage.set(row.message_id, arr);
+          }
+        }
+      }
 
       if (msgs) {
         const map = new Map<string, MessageData>();
         const roots: MessageData[] = [];
 
-        msgs.forEach(m => {
-          const profileData = Array.isArray((m as any).profiles) ? (m as any).profiles[0] : (m as any).profiles;
+        msgs.forEach((m) => {
+          const profileData = Array.isArray((m as { profiles?: unknown }).profiles)
+            ? (m as { profiles: unknown[] }).profiles[0]
+            : (m as { profiles?: unknown }).profiles;
           map.set(m.id, {
             id: m.id,
             chat_id: m.chat_id,
@@ -125,15 +193,19 @@ const Index = () => {
             user_id: m.user_id,
             content: m.content,
             image_url: m.image_url,
+            attachment_url: m.attachment_url ?? null,
+            attachment_type: m.attachment_type ?? null,
+            is_pinned: m.is_pinned ?? false,
             votes_count: m.votes_count,
             created_at: m.created_at,
             profile: profileData || null,
             userVote: voteMap.get(m.id) || 0,
             children: [],
+            mentionedUsernames: mentionByMessage.get(m.id) || [],
           });
         });
 
-        msgs.forEach(m => {
+        msgs.forEach((m) => {
           const node = map.get(m.id)!;
           if (m.parent_id && map.has(m.parent_id)) {
             map.get(m.parent_id)!.children.push(node);
@@ -149,94 +221,183 @@ const Index = () => {
     fetchMessages();
   }, [activeRoomId, user, memberRoomIds]);
 
-  const handleVote = useCallback(async (messageId: string, vote: 1 | -1) => {
-    if (!user) return;
-    const findVote = (msgs: MessageData[]): number => {
-      for (const m of msgs) {
-        if (m.id === messageId) return m.userVote;
-        const found = findVote(m.children);
-        if (found !== 0) return found;
+  useEffect(() => {
+    if (!urlMessageId || loadingMessages || didScrollRef.current === urlMessageId) return;
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-message-id="${urlMessageId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightMessageId(urlMessageId);
+        window.setTimeout(() => setHighlightMessageId(null), 1600);
+        didScrollRef.current = urlMessageId;
       }
-      return 0;
-    };
-    const currentVote = findVote(messages);
-    const newVote = currentVote === vote ? 0 : vote;
-    const diff = newVote - currentVote;
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [urlMessageId, loadingMessages, messages]);
 
-    const updateTree = (msgs: MessageData[]): MessageData[] =>
-      msgs.map(m => {
-        if (m.id === messageId) return { ...m, userVote: newVote, votes_count: m.votes_count + diff };
-        return { ...m, children: updateTree(m.children) };
-      });
-    setMessages(prev => updateTree(prev));
-
-    if (newVote === 0) {
-      await supabase.from("votes").delete().eq("message_id", messageId).eq("user_id", user.id);
-    } else {
-      await supabase.from("votes").upsert({ message_id: messageId, user_id: user.id, value: newVote }, { onConflict: "message_id,user_id" });
-    }
-  }, [user, messages]);
-
-  const handleReply = useCallback(async (parentId: string, content: string) => {
-    if (!user || !activeRoomId) return;
-    const { data } = await supabase
-      .from("messages")
-      .insert({ chat_id: activeRoomId, parent_id: parentId, user_id: user.id, content, votes_count: 1 })
-      .select("*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)")
-      .single();
-
-    if (data) {
-      await supabase.from("votes").insert({ message_id: data.id, user_id: user.id, value: 1 });
-      const profileData = Array.isArray((data as any).profiles) ? (data as any).profiles[0] : (data as any).profiles;
-      const newMsg: MessageData = {
-        id: data.id,
-        chat_id: data.chat_id,
-        parent_id: data.parent_id,
-        user_id: data.user_id,
-        content: data.content,
-        image_url: data.image_url,
-        votes_count: data.votes_count,
-        created_at: data.created_at,
-        profile: profileData || null,
-        userVote: 1,
-        children: [],
+  const handleVote = useCallback(
+    async (messageId: string, vote: 1 | -1) => {
+      if (!user) return;
+      const findVote = (msgs: MessageData[]): number => {
+        for (const m of msgs) {
+          if (m.id === messageId) return m.userVote;
+          const found = findVote(m.children);
+          if (found !== 0) return found;
+        }
+        return 0;
       };
-      const addToTree = (msgs: MessageData[]): MessageData[] =>
-        msgs.map(m => {
-          if (m.id === parentId) return { ...m, children: [...m.children, newMsg] };
-          return { ...m, children: addToTree(m.children) };
+      const currentVote = findVote(messages);
+      const newVote = currentVote === vote ? 0 : vote;
+      const diff = newVote - currentVote;
+
+      const updateTree = (msgs: MessageData[]): MessageData[] =>
+        msgs.map((m) => {
+          if (m.id === messageId)
+            return {
+              ...m,
+              userVote: newVote,
+              votes_count: m.votes_count + diff,
+            };
+          return { ...m, children: updateTree(m.children) };
         });
-      setMessages(prev => addToTree(prev));
-    }
-  }, [user, activeRoomId]);
+      setMessages((prev) => updateTree(prev));
 
-  const handleNewThread = useCallback(async (content: string) => {
-    if (!user || !activeRoomId) return;
-    const { data } = await supabase
-      .from("messages")
-      .insert({ chat_id: activeRoomId, parent_id: null, user_id: user.id, content, votes_count: 1 })
-      .select("*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)")
-      .single();
+      if (newVote === 0) {
+        await supabase
+          .from("votes")
+          .delete()
+          .eq("message_id", messageId)
+          .eq("user_id", user.id);
+      } else {
+        await supabase.from("votes").upsert(
+          { message_id: messageId, user_id: user.id, value: newVote },
+          { onConflict: "message_id,user_id" }
+        );
+      }
+    },
+    [user, messages]
+  );
 
-    if (data) {
-      await supabase.from("votes").insert({ message_id: data.id, user_id: user.id, value: 1 });
-      const profileData = Array.isArray((data as any).profiles) ? (data as any).profiles[0] : (data as any).profiles;
-      const newMsg: MessageData = {
-        id: data.id,
-        chat_id: data.chat_id,
-        parent_id: null,
-        user_id: data.user_id,
-        content: data.content,
-        image_url: data.image_url,
-        votes_count: data.votes_count,
-        created_at: data.created_at,
-        profile: profileData || null,
-        userVote: 1,
-        children: [],
-      };
-      setMessages(prev => [newMsg, ...prev]);
-    }
-  }, [user, activeRoomId]);
+  const handleReply = useCallback(
+    async (
+      parentId: string,
+      content: string,
+      attachment?: AttachmentPayload | null
+    ) => {
+      if (!user || !activeRoomId) return;
+      const { data } = await supabase
+        .from("messages")
+        .insert({
+          chat_id: activeRoomId,
+          parent_id: parentId,
+          user_id: user.id,
+          content: content.trim() || "",
+          votes_count: 1,
+          attachment_url: attachment?.path ?? null,
+          attachment_type: attachment?.attachment_type ?? null,
+        })
+        .select(
+          "*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)"
+        )
+        .single();
+
+      if (data) {
+        await supabase.from("votes").insert({
+          message_id: data.id,
+          user_id: user.id,
+          value: 1,
+        });
+        await insertMentionsAndNotifications(data.id, data.content, user.id);
+        const profileData = Array.isArray((data as { profiles?: unknown }).profiles)
+          ? (data as { profiles: unknown[] }).profiles[0]
+          : (data as { profiles?: unknown }).profiles;
+        const newMsg: MessageData = {
+          id: data.id,
+          chat_id: data.chat_id,
+          parent_id: data.parent_id,
+          user_id: data.user_id,
+          content: data.content,
+          image_url: data.image_url,
+          attachment_url: data.attachment_url ?? null,
+          attachment_type: data.attachment_type ?? null,
+          is_pinned: false,
+          votes_count: data.votes_count,
+          created_at: data.created_at,
+          profile: profileData || null,
+          userVote: 1,
+          children: [],
+          mentionedUsernames: [],
+        };
+        const addToTree = (msgs: MessageData[]): MessageData[] =>
+          msgs.map((m) => {
+            if (m.id === parentId)
+              return { ...m, children: [...m.children, newMsg] };
+            return { ...m, children: addToTree(m.children) };
+          });
+        setMessages((prev) => addToTree(prev));
+      }
+    },
+    [user, activeRoomId]
+  );
+
+  const handleNewThread = useCallback(
+    async (content: string, attachment?: AttachmentPayload | null) => {
+      if (!user || !activeRoomId) return;
+      const { data } = await supabase
+        .from("messages")
+        .insert({
+          chat_id: activeRoomId,
+          parent_id: null,
+          user_id: user.id,
+          content: content.trim() || "",
+          votes_count: 1,
+          attachment_url: attachment?.path ?? null,
+          attachment_type: attachment?.attachment_type ?? null,
+        })
+        .select(
+          "*, profiles!messages_user_id_profiles_fkey(display_name, username, avatar_url)"
+        )
+        .single();
+
+      if (data) {
+        await supabase.from("votes").insert({
+          message_id: data.id,
+          user_id: user.id,
+          value: 1,
+        });
+        await insertMentionsAndNotifications(data.id, data.content, user.id);
+        const profileData = Array.isArray((data as { profiles?: unknown }).profiles)
+          ? (data as { profiles: unknown[] }).profiles[0]
+          : (data as { profiles?: unknown }).profiles;
+        const newMsg: MessageData = {
+          id: data.id,
+          chat_id: data.chat_id,
+          parent_id: null,
+          user_id: data.user_id,
+          content: data.content,
+          image_url: data.image_url,
+          attachment_url: data.attachment_url ?? null,
+          attachment_type: data.attachment_type ?? null,
+          is_pinned: data.is_pinned ?? false,
+          votes_count: data.votes_count,
+          created_at: data.created_at,
+          profile: profileData || null,
+          userVote: 1,
+          children: [],
+          mentionedUsernames: [],
+        };
+        setMessages((prev) => [newMsg, ...prev]);
+      }
+    },
+    [user, activeRoomId]
+  );
+
+  const handleTogglePin = useCallback(async (messageId: string) => {
+    const { error } = await supabase.rpc("toggle_message_pin", {
+      p_message_id: messageId,
+    });
+    if (!error) setMessages((prev) => flipPinInTree(prev, messageId));
+  }, []);
 
   const handleCreateRoom = useCallback(async (name: string, description: string) => {
     if (!user) return;
@@ -247,7 +408,10 @@ const Index = () => {
       .single();
 
     if (data) {
-      await supabase.from("room_members").insert({ room_id: data.id, user_id: user.id });
+      await supabase.from("room_members").insert({
+        room_id: data.id,
+        user_id: user.id,
+      });
       const newRoom: RoomData = {
         id: data.id,
         name: data.name,
@@ -256,8 +420,8 @@ const Index = () => {
         created_by: data.created_by,
         memberCount: 1,
       };
-      setRooms(prev => [newRoom, ...prev]);
-      setMemberRoomIds(prev => new Set([...prev, data.id]));
+      setRooms((prev) => [newRoom, ...prev]);
+      setMemberRoomIds((prev) => new Set([...prev, data.id]));
       setActiveRoomId(data.id);
     }
   }, [user]);
@@ -270,35 +434,52 @@ const Index = () => {
       .select()
       .single();
     if (data) {
-      setJoinRequests(prev => [...prev, data as JoinRequest]);
+      setJoinRequests((prev) => [...prev, data as JoinRequest]);
     }
   }, [user]);
 
-  const handleApproveRequest = useCallback(async (requestId: string, approved: boolean) => {
-    const status = approved ? "approved" : "rejected";
-    await supabase.from("room_join_requests").update({ status }).eq("id", requestId);
+  const handleApproveRequest = useCallback(
+    async (requestId: string, approved: boolean) => {
+      const status = approved ? "approved" : "rejected";
+      await supabase.from("room_join_requests").update({ status }).eq("id", requestId);
 
-    if (approved) {
-      const req = joinRequests.find(r => r.id === requestId) || 
-        (await supabase.from("room_join_requests").select("*").eq("id", requestId).single()).data;
-      if (req) {
-        await supabase.from("room_members").insert({ room_id: (req as any).room_id, user_id: (req as any).user_id });
+      if (approved) {
+        const req =
+          joinRequests.find((r) => r.id === requestId) ||
+          (
+            await supabase
+              .from("room_join_requests")
+              .select("*")
+              .eq("id", requestId)
+              .single()
+          ).data;
+        if (req) {
+          await supabase.from("room_members").insert({
+            room_id: (req as JoinRequest).room_id,
+            user_id: (req as JoinRequest).user_id,
+          });
+        }
       }
-    }
 
-    // Refresh requests for this room
-    setJoinRequests(prev => prev.map(r => r.id === requestId ? { ...r, status } : r));
-  }, [joinRequests]);
+      setJoinRequests((prev) =>
+        prev.map((r) => (r.id === requestId ? { ...r, status } : r))
+      );
+    },
+    [joinRequests]
+  );
 
-  const activeRoom = rooms.find(r => r.id === activeRoomId);
+  const activeRoom = rooms.find((r) => r.id === activeRoomId);
   const isMember = activeRoomId ? memberRoomIds.has(activeRoomId) : false;
-  const activeRoomRequest = activeRoomId ? joinRequests.find(r => r.room_id === activeRoomId) : null;
+  const activeRoomRequest = activeRoomId
+    ? joinRequests.find((r) => r.room_id === activeRoomId)
+    : null;
 
-  // Get pending requests for rooms the current user owns
-  const [pendingRequests, setPendingRequests] = useState<JoinRequest[]>([]);
   useEffect(() => {
     if (!user || !activeRoom) return;
-    if (activeRoom.created_by !== user.id) { setPendingRequests([]); return; }
+    if (activeRoom.created_by !== user.id) {
+      setPendingRequests([]);
+      return;
+    }
     const fetchPending = async () => {
       const { data } = await supabase
         .from("room_join_requests")
@@ -353,6 +534,8 @@ const Index = () => {
           pendingRequests={pendingRequests}
           onApproveRequest={handleApproveRequest}
           isOwner={activeRoom.created_by === user?.id}
+          highlightMessageId={highlightMessageId}
+          onTogglePin={handleTogglePin}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-muted-foreground">

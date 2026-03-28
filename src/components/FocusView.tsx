@@ -1,20 +1,44 @@
-import { MessageData } from "@/pages/Index";
+import { MessageData, AttachmentPayload } from "@/pages/Index";
 import { ThreadMessage } from "./ThreadMessage";
 import { ArrowLeft, Maximize2 } from "lucide-react";
 
 interface FocusViewProps {
   message: MessageData;
+  roomId: string;
   onBack: () => void;
   onVote: (messageId: string, vote: 1 | -1) => void;
-  onReply: (parentId: string, content: string) => void;
+  onReply: (
+    parentId: string,
+    content: string,
+    attachment?: AttachmentPayload | null
+  ) => void | Promise<void>;
   onFocus: (message: MessageData) => void;
+  highlightMessageId?: string | null;
+  isRoomOwner: boolean;
+  onTogglePin: (messageId: string) => void | Promise<void>;
+  onScrollToMessage: (messageId: string) => void;
 }
 
-export const FocusView = ({ message, onBack, onVote, onReply, onFocus }: FocusViewProps) => {
+export const FocusView = ({
+  message,
+  roomId,
+  onBack,
+  onVote,
+  onReply,
+  onFocus,
+  highlightMessageId,
+  isRoomOwner,
+  onTogglePin,
+  onScrollToMessage,
+}: FocusViewProps) => {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <div className="px-6 py-4 border-b border-border flex items-center gap-3">
-        <button onClick={onBack} className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+        >
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="flex items-center gap-2">
@@ -24,7 +48,19 @@ export const FocusView = ({ message, onBack, onVote, onReply, onFocus }: FocusVi
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin px-6 py-4">
         <div className="bg-card rounded-lg p-4 border border-primary/20">
-          <ThreadMessage message={message} depth={0} maxDepth={4} onVote={onVote} onReply={onReply} onFocus={onFocus} />
+          <ThreadMessage
+            message={message}
+            depth={0}
+            maxDepth={4}
+            roomId={roomId}
+            onVote={onVote}
+            onReply={onReply}
+            onFocus={onFocus}
+            highlightMessageId={highlightMessageId}
+            isRoomOwner={isRoomOwner}
+            onTogglePin={onTogglePin}
+            onScrollToMessage={onScrollToMessage}
+          />
         </div>
       </div>
     </div>

@@ -43,31 +43,40 @@ export type Database = {
       }
       messages: {
         Row: {
+          attachment_type: string | null
+          attachment_url: string | null
           chat_id: string
           content: string
           created_at: string
           id: string
           image_url: string | null
+          is_pinned: boolean
           parent_id: string | null
           user_id: string
           votes_count: number
         }
         Insert: {
+          attachment_type?: string | null
+          attachment_url?: string | null
           chat_id: string
           content?: string
           created_at?: string
           id?: string
           image_url?: string | null
+          is_pinned?: boolean
           parent_id?: string | null
           user_id: string
           votes_count?: number
         }
         Update: {
+          attachment_type?: string | null
+          attachment_url?: string | null
           chat_id?: string
           content?: string
           created_at?: string
           id?: string
           image_url?: string | null
+          is_pinned?: boolean
           parent_id?: string | null
           user_id?: string
           votes_count?: number
@@ -93,6 +102,64 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      mentions: {
+        Row: {
+          id: string
+          mentioned_user_id: string
+          message_id: string
+        }
+        Insert: {
+          id?: string
+          mentioned_user_id: string
+          message_id: string
+        }
+        Update: {
+          id?: string
+          mentioned_user_id?: string
+          message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mentions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          message_id: string
+          read_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message_id: string
+          read_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message_id?: string
+          read_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -227,7 +294,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      toggle_message_pin: {
+        Args: { p_message_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
